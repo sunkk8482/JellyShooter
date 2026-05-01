@@ -8,7 +8,8 @@ public class JellyBlock : MonoBehaviour
         Red,
         Blue,
         Green,
-        Yellow
+        Yellow,
+        Purple
     }
 
     public enum BlockShape
@@ -17,13 +18,19 @@ public class JellyBlock : MonoBehaviour
         Vertical2,
         Horizontal2,
         Square2,
-        LShape3
+        LShape3,
+        Vertical3,
+        Horizontal3,
+        LShape4,
+        JShape4,
+        TShape4
     }
 
     public BlockColor blockColor;
     public BlockShape blockShape;
 
     public int rotationIndex = 0; // 0,1,2,3
+    public List<BlockColor> pieceColors = new List<BlockColor>();
 
     private Rigidbody2D rb;
     private bool isStopped = false;
@@ -39,6 +46,7 @@ public class JellyBlock : MonoBehaviour
         sr = GetComponent<SpriteRenderer>();
 
         BuildShape();
+        EnsurePieceColors();
         ApplyColorVisual();
     }
 
@@ -112,31 +120,83 @@ public class JellyBlock : MonoBehaviour
         if (sr != null)
             sr.enabled = false;
 
-        Color colorValue = Color.red;
+        EnsurePieceColors();
 
-        switch (blockColor)
+        for (int i = 0; i < pieces.Count; i++)
         {
-            case BlockColor.Red:
-                colorValue = Color.red;
-                break;
-            case BlockColor.Blue:
-                colorValue = Color.blue;
-                break;
-            case BlockColor.Green:
-                colorValue = Color.green;
-                break;
-            case BlockColor.Yellow:
-                colorValue = Color.yellow;
-                break;
-        }
-
-        foreach (Transform piece in pieces)
-        {
-            SpriteRenderer pieceRenderer = piece.GetComponent<SpriteRenderer>();
+            SpriteRenderer pieceRenderer = pieces[i].GetComponent<SpriteRenderer>();
             if (pieceRenderer != null)
             {
-                pieceRenderer.color = colorValue;
+                pieceRenderer.color = GetColorValue(GetPieceColor(i));
             }
+        }
+    }
+
+    public void RandomizePieceColors()
+    {
+        RandomizePieceColors(System.Enum.GetValues(typeof(BlockColor)).Length);
+    }
+
+    public void RandomizePieceColors(int colorCount)
+    {
+        pieceColors.Clear();
+
+        int availableColorCount = System.Enum.GetValues(typeof(BlockColor)).Length;
+        int clampedColorCount = Mathf.Clamp(colorCount, 1, availableColorCount);
+        int count = GetShapeOffsets().Count;
+        for (int i = 0; i < count; i++)
+        {
+            pieceColors.Add((BlockColor)Random.Range(0, clampedColorCount));
+        }
+
+        if (pieceColors.Count > 0)
+            blockColor = pieceColors[0];
+    }
+
+    void EnsurePieceColors()
+    {
+        int count = GetShapeOffsets().Count;
+
+        while (pieceColors.Count < count)
+        {
+            pieceColors.Add(blockColor);
+        }
+
+        if (pieceColors.Count > count)
+        {
+            pieceColors.RemoveRange(count, pieceColors.Count - count);
+        }
+
+        if (pieceColors.Count > 0)
+            blockColor = pieceColors[0];
+    }
+
+    BlockColor GetPieceColor(int index)
+    {
+        EnsurePieceColors();
+
+        if (index < 0 || index >= pieceColors.Count)
+            return blockColor;
+
+        return pieceColors[index];
+    }
+
+    Color GetColorValue(BlockColor color)
+    {
+        switch (color)
+        {
+            case BlockColor.Red:
+                return Color.red;
+            case BlockColor.Blue:
+                return Color.blue;
+            case BlockColor.Green:
+                return Color.green;
+            case BlockColor.Yellow:
+                return Color.yellow;
+            case BlockColor.Purple:
+                return new Color(0.75f, 0.25f, 1f);
+            default:
+                return Color.white;
         }
     }
 
@@ -232,6 +292,39 @@ public class JellyBlock : MonoBehaviour
                 offsets.Add(new Vector2(0f, 1f));
                 offsets.Add(new Vector2(1f, 0f));
                 break;
+
+            case BlockShape.Vertical3:
+                offsets.Add(new Vector2(0f, 0f));
+                offsets.Add(new Vector2(0f, 1f));
+                offsets.Add(new Vector2(0f, 2f));
+                break;
+
+            case BlockShape.Horizontal3:
+                offsets.Add(new Vector2(0f, 0f));
+                offsets.Add(new Vector2(1f, 0f));
+                offsets.Add(new Vector2(2f, 0f));
+                break;
+
+            case BlockShape.LShape4:
+                offsets.Add(new Vector2(0f, 0f));
+                offsets.Add(new Vector2(0f, 1f));
+                offsets.Add(new Vector2(0f, 2f));
+                offsets.Add(new Vector2(1f, 0f));
+                break;
+
+            case BlockShape.JShape4:
+                offsets.Add(new Vector2(1f, 0f));
+                offsets.Add(new Vector2(1f, 1f));
+                offsets.Add(new Vector2(1f, 2f));
+                offsets.Add(new Vector2(0f, 0f));
+                break;
+
+            case BlockShape.TShape4:
+                offsets.Add(new Vector2(0f, 0f));
+                offsets.Add(new Vector2(1f, 0f));
+                offsets.Add(new Vector2(2f, 0f));
+                offsets.Add(new Vector2(1f, 1f));
+                break;
         }
 
         return offsets;
@@ -316,11 +409,12 @@ public class JellyBlock : MonoBehaviour
 
         if (finalCells != null)
         {
-            foreach (Vector2Int finalCell in finalCells)
+            for (int i = 0; i < finalCells.Count; i++)
             {
+                Vector2Int finalCell = finalCells[i];
                 if (!board.IsInside(finalCell.x, finalCell.y)) continue;
 
-                GameObject placedPiece = CreatePlacedPiece(finalCell);
+                GameObject placedPiece = CreatePlacedPiece(finalCell, GetPieceColor(i));
                 board.SetBlock(finalCell.x, finalCell.y, placedPiece);
             }
         }
@@ -343,9 +437,10 @@ public class JellyBlock : MonoBehaviour
 
         List<Vector2Int> finalCells = GetCellsFromCurrentWorldPosition(collision);
 
-        foreach (Vector2Int finalCell in finalCells)
+        for (int i = 0; i < finalCells.Count; i++)
         {
-            GameObject placedPiece = CreatePlacedPiece(finalCell);
+            Vector2Int finalCell = finalCells[i];
+            GameObject placedPiece = CreatePlacedPiece(finalCell, GetPieceColor(i));
             board.SetBlock(finalCell.x, finalCell.y, placedPiece);
         }
 
@@ -546,7 +641,7 @@ public class JellyBlock : MonoBehaviour
         return false;
     }
 
-    GameObject CreatePlacedPiece(Vector2Int gridCell)
+    GameObject CreatePlacedPiece(Vector2Int gridCell, BlockColor pieceColor)
     {
         GameObject placed = new GameObject("PlacedPiece");
         placed.tag = "Block";
@@ -566,25 +661,11 @@ public class JellyBlock : MonoBehaviour
         placedRb.simulated = false;
 
         JellyPlacedPiece pieceData = placed.AddComponent<JellyPlacedPiece>();
-        pieceData.blockColor = blockColor;
+        pieceData.blockColor = pieceColor;
         pieceData.gridX = gridCell.x;
         pieceData.gridY = gridCell.y;
 
-        switch (blockColor)
-        {
-            case BlockColor.Red:
-                placedRenderer.color = Color.red;
-                break;
-            case BlockColor.Blue:
-                placedRenderer.color = Color.blue;
-                break;
-            case BlockColor.Green:
-                placedRenderer.color = Color.green;
-                break;
-            case BlockColor.Yellow:
-                placedRenderer.color = Color.yellow;
-                break;
-        }
+        placedRenderer.color = GetColorValue(pieceColor);
 
         return placed;
     }

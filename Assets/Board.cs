@@ -14,10 +14,14 @@ public class Board : MonoBehaviour
     public float removeAnimationDuration = 0.15f;
     public float fallAnimationDuration = 0.18f;
     public bool showBoardGrid = true;
+    public bool showInternalGrid = false;
     public Color boardBorderColor = new Color(1f, 1f, 1f, 0.9f);
-    public Color boardGridColor = new Color(1f, 1f, 1f, 0.35f);
+    public Color boardGridColor = new Color(1f, 1f, 1f, 0.08f);
+    public Color gameOverLineColor = new Color(1f, 0.28f, 0f, 0.65f);
+    public Color landingHighlightColor = new Color(1f, 1f, 1f, 0.18f);
     public float boardBorderLineWidth = 0.05f;
     public float boardGridLineWidth = 0.025f;
+    public float gameOverLineWidth = 0.08f;
     public bool createSideWalls = true;
     public float sideWallThickness = 0.5f;
     public bool fitGroundToBoard = true;
@@ -30,6 +34,8 @@ public class Board : MonoBehaviour
     private GameObject[,] grid;
     private Transform boardGridRoot;
     private Transform boardWallRoot;
+    private Transform gameOverLineRoot;
+    private Transform landingHighlightRoot;
     private Sprite gridLineSprite;
 
     void Awake()
@@ -43,6 +49,7 @@ public class Board : MonoBehaviour
     {
         FitGroundToBoard();
         CreateBoardGridVisual();
+        CreateGameOverLineVisual();
         CreateSideWalls();
         FitCameraToBoard();
     }
@@ -92,6 +99,8 @@ public class Board : MonoBehaviour
         {
             float lineX = left + x * cellSize;
             bool isBorder = x == 0 || x == width;
+            if (!isBorder && !showInternalGrid) continue;
+
             CreateGridLine(lineX, (bottom + top) * 0.5f, isBorder ? boardBorderLineWidth : boardGridLineWidth, top - bottom, isBorder);
         }
 
@@ -99,6 +108,8 @@ public class Board : MonoBehaviour
         {
             float lineY = bottom + y * cellSize;
             bool isBorder = y == 0 || y == height;
+            if (!isBorder && !showInternalGrid) continue;
+
             CreateGridLine((left + right) * 0.5f, lineY, right - left, isBorder ? boardBorderLineWidth : boardGridLineWidth, isBorder);
         }
     }
@@ -115,6 +126,31 @@ public class Board : MonoBehaviour
         renderer.sortingOrder = isBorder ? 5 : 4;
 
         lineObject.transform.localScale = new Vector3(lineWidth, lineHeight, 1f);
+    }
+
+    void CreateGameOverLineVisual()
+    {
+        if (gameOverLineRoot != null)
+            Destroy(gameOverLineRoot.gameObject);
+
+        GameObject root = new GameObject("GameOverLine");
+        root.transform.SetParent(transform);
+        gameOverLineRoot = root.transform;
+
+        int clampedGameOverY = Mathf.Clamp(gameOverY, 0, height);
+        float left = origin.x - cellSize * 0.5f;
+        float right = origin.x + (width - 0.5f) * cellSize;
+        float lineY = origin.y + (clampedGameOverY - 0.5f) * cellSize;
+
+        GameObject lineObject = new GameObject("GameOverThresholdLine");
+        lineObject.transform.SetParent(gameOverLineRoot);
+        lineObject.transform.position = new Vector3((left + right) * 0.5f, lineY, -0.2f);
+        lineObject.transform.localScale = new Vector3(right - left, gameOverLineWidth, 1f);
+
+        SpriteRenderer renderer = lineObject.AddComponent<SpriteRenderer>();
+        renderer.sprite = CreateWhiteSprite();
+        renderer.color = gameOverLineColor;
+        renderer.sortingOrder = 20;
     }
 
     Sprite CreateWhiteSprite()
@@ -256,6 +292,41 @@ public class Board : MonoBehaviour
     {
         if (!IsInside(x, y)) return null;
         return grid[x, y];
+    }
+
+    public void ShowLandingHighlight(List<Vector2Int> cells)
+    {
+        ClearLandingHighlight();
+
+        if (cells == null || cells.Count == 0) return;
+
+        GameObject root = new GameObject("LandingHighlight");
+        root.transform.SetParent(transform);
+        landingHighlightRoot = root.transform;
+
+        foreach (Vector2Int cell in cells)
+        {
+            if (!IsInside(cell.x, cell.y)) continue;
+
+            GameObject highlight = new GameObject("LandingCellHighlight");
+            highlight.transform.SetParent(landingHighlightRoot);
+            highlight.transform.position = new Vector3(GetWorldPosition(cell.x, cell.y).x, GetWorldPosition(cell.x, cell.y).y, -0.2f);
+            highlight.transform.localScale = new Vector3(cellSize * 0.88f, cellSize * 0.88f, 1f);
+
+            SpriteRenderer renderer = highlight.AddComponent<SpriteRenderer>();
+            renderer.sprite = CreateWhiteSprite();
+            renderer.color = landingHighlightColor;
+            renderer.sortingOrder = 1;
+        }
+    }
+
+    public void ClearLandingHighlight()
+    {
+        if (landingHighlightRoot != null)
+        {
+            Destroy(landingHighlightRoot.gameObject);
+            landingHighlightRoot = null;
+        }
     }
 
     public void RemoveBlock(int x, int y)
