@@ -11,7 +11,7 @@ public class Launcher : MonoBehaviour
     public float maxDragDistance = 2f;
     public float touchRadius = 1f;
     public float maxPreviewDistance = 8f;
-    public float shotMoveSpeed = 14f;
+    public float shootMoveSpeed = 14f;
 
     private bool isDragging = false;
     private bool isShooting = false;
@@ -24,12 +24,33 @@ public class Launcher : MonoBehaviour
     private GameObject ghostRoot;
     private Board board;
 
+    public struct LandingResult
+    {
+        public List<Vector2Int> cells;
+        public Vector2 direction;
+        public float travelDistance;
+        public Vector2 visualTargetWorldPosition;
+
+        public LandingResult(List<Vector2Int> cells, Vector2 direction, float travelDistance, Vector2 visualTargetWorldPosition)
+        {
+            this.cells = cells;
+            this.direction = direction;
+            this.travelDistance = travelDistance;
+            this.visualTargetWorldPosition = visualTargetWorldPosition;
+        }
+    }
+
     void Start()
     {
         board = FindObjectOfType<Board>();
 
         if (board != null)
+        {
             transform.position = board.GetBoardTopCenter(0f);
+
+            if (nextPreviewPoint != null)
+                nextPreviewPoint.position = board.GetBoardRightCenter(1.8f);
+        }
 
         lineRenderer = GetComponent<LineRenderer>();
 
@@ -157,8 +178,7 @@ public class Launcher : MonoBehaviour
         if (currentBlock == null) return;
 
         JellyBlock currentJelly = currentBlock.GetComponent<JellyBlock>();
-        List<Vector2Int> landingCells = CalculateLandingCells(direction);
-        Vector2 targetWorldPosition = GetLandingWorldPosition(landingCells);
+        LandingResult landing = CalculateLandingCells(direction);
 
         Rigidbody2D rb = currentBlock.GetComponent<Rigidbody2D>();
         if (rb != null)
@@ -182,25 +202,29 @@ public class Launcher : MonoBehaviour
             nextBlock = CreatePreviewBlock(nextPreviewPoint.position);
         }
 
-        StartCoroutine(MoveBlockToLanding(shotBlock, currentJelly, landingCells, targetWorldPosition));
+        StartCoroutine(MoveBlockToLanding(shotBlock, currentJelly, landing));
     }
 
-    public List<Vector2Int> CalculateLandingCells(Vector2 direction)
+    public LandingResult CalculateLandingCells(Vector2 direction)
     {
         List<Vector2Int> fallbackCells = new List<Vector2Int>();
+        Vector2 fallbackPosition = currentBlock != null ? currentBlock.transform.position : transform.position;
+        Vector2 fallbackDirection = direction.sqrMagnitude < 0.001f ? Vector2.down : direction.normalized;
 
         if (currentBlock == null || board == null)
-            return fallbackCells;
+            return new LandingResult(fallbackCells, fallbackDirection, 0f, fallbackPosition);
 
         JellyBlock jelly = currentBlock.GetComponent<JellyBlock>();
         if (jelly == null)
-            return fallbackCells;
+            return new LandingResult(fallbackCells, fallbackDirection, 0f, fallbackPosition);
 
-        Vector2 dir = direction.sqrMagnitude < 0.001f ? Vector2.down : direction.normalized;
+        Vector2 dir = fallbackDirection;
         Vector2 start = currentBlock.transform.position;
         float step = Mathf.Max(0.05f, board.cellSize * 0.1f);
 
         List<Vector2Int> lastValidCells = null;
+        Vector2 lastValidPosition = start;
+        float lastValidDistance = 0f;
 
         for (float distance = 0f; distance <= maxPreviewDistance; distance += step)
         {
@@ -210,32 +234,21 @@ public class Launcher : MonoBehaviour
             if (CanPlaceCells(cells))
             {
                 lastValidCells = cells;
+                lastValidPosition = anchor;
+                lastValidDistance = distance;
                 fallbackCells = cells;
+                fallbackPosition = anchor;
                 continue;
             }
 
             if (lastValidCells != null)
-                return lastValidCells;
+                return new LandingResult(lastValidCells, dir, lastValidDistance, lastValidPosition);
         }
 
         if (lastValidCells != null)
-            return lastValidCells;
+            return new LandingResult(lastValidCells, dir, lastValidDistance, lastValidPosition);
 
-        return fallbackCells;
-    }
-
-    public Vector2 GetLandingWorldPosition(List<Vector2Int> cells)
-    {
-        if (currentBlock == null || cells == null || cells.Count == 0 || board == null)
-            return transform.position;
-
-        JellyBlock jelly = currentBlock.GetComponent<JellyBlock>();
-        if (jelly == null)
-            return transform.position;
-
-        List<Vector2> offsets = jelly.GetShapeOffsets();
-        Vector2 firstCellWorld = board.GetWorldPosition(cells[0].x, cells[0].y);
-        return firstCellWorld - offsets[0] * board.cellSize;
+        return new LandingResult(fallbackCells, dir, 0f, fallbackPosition);
     }
 
     List<Vector2Int> GetCellsFromAnchor(JellyBlock jelly, Vector2 anchorWorldPos)
@@ -273,27 +286,27 @@ public class Launcher : MonoBehaviour
         return true;
     }
 
-    IEnumerator MoveBlockToLanding(GameObject shotBlock, JellyBlock jelly, List<Vector2Int> landingCells, Vector2 targetWorldPosition)
+    IEnumerator MoveBlockToLanding(GameObject shotBlock, JellyBlock jelly, LandingResult landing)
     {
         isShooting = true;
 
         Vector2 startPosition = shotBlock.transform.position;
-        float distance = Vector2.Distance(startPosition, targetWorldPosition);
-        float duration = Mathf.Max(0.05f, distance / Mathf.Max(0.01f, shotMoveSpeed));
+        float duration = Mathf.Max(0.05f, landing.travelDistance / Mathf.Max(0.01f, shootMoveSpeed));
         float elapsed = 0f;
 
         while (elapsed < duration && shotBlock != null)
         {
             elapsed += Time.deltaTime;
             float t = Mathf.Clamp01(elapsed / duration);
-            shotBlock.transform.position = Vector2.Lerp(startPosition, targetWorldPosition, t);
+            float currentDistance = landing.travelDistance * t;
+            shotBlock.transform.position = startPosition + landing.direction * currentDistance;
             yield return null;
         }
 
         if (shotBlock != null)
         {
-            shotBlock.transform.position = targetWorldPosition;
-            jelly.PlaceAtCells(landingCells);
+            shotBlock.transform.position = startPosition + landing.direction * landing.travelDistance;
+            jelly.PlaceAtCells(landing.cells);
         }
 
         isShooting = false;

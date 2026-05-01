@@ -704,7 +704,7 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 0436b1f904689b44facc571da3438b4c, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  width: 6
+  width: 8
   height: 12
   cellSize: 1
   groundTransform: {fileID: 774798621}

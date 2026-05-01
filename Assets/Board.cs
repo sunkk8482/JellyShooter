@@ -4,7 +4,7 @@ using UnityEngine;
 
 public class Board : MonoBehaviour
 {
-    public int width = 6;
+    public int width = 8;
     public int height = 12;
     public float cellSize = 1f;
 
@@ -20,8 +20,11 @@ public class Board : MonoBehaviour
     public float boardGridLineWidth = 0.025f;
     public bool createSideWalls = true;
     public float sideWallThickness = 0.5f;
+    public bool fitGroundToBoard = true;
+    public float groundExtraWidth = 2f;
     public bool fitCameraToBoard = true;
     public float cameraVerticalPadding = 1.5f;
+    public float cameraHorizontalPadding = 3f;
 
     private Vector2 origin;
     private GameObject[,] grid;
@@ -31,12 +34,14 @@ public class Board : MonoBehaviour
 
     void Awake()
     {
+        width = Mathf.Max(width, 8);
         grid = new GameObject[width, height];
         SetupOriginFromGround();
     }
 
     void Start()
     {
+        FitGroundToBoard();
         CreateBoardGridVisual();
         CreateSideWalls();
         FitCameraToBoard();
@@ -162,6 +167,15 @@ public class Board : MonoBehaviour
         collider.size = new Vector2(sideWallThickness, wallHeight);
     }
 
+    void FitGroundToBoard()
+    {
+        if (!fitGroundToBoard || groundTransform == null) return;
+
+        Vector3 scale = groundTransform.localScale;
+        scale.x = Mathf.Max(scale.x, width * cellSize + groundExtraWidth);
+        groundTransform.localScale = scale;
+    }
+
     public Vector2 GetWorldPosition(int x, int y)
     {
         return origin + new Vector2(x * cellSize, y * cellSize);
@@ -183,6 +197,14 @@ public class Board : MonoBehaviour
         return new Vector2((left + right) * 0.5f, top + yOffset);
     }
 
+    public Vector2 GetBoardRightCenter(float xOffset)
+    {
+        float right = origin.x + (width - 0.5f) * cellSize;
+        float bottom = origin.y - cellSize * 0.5f;
+        float top = origin.y + (height - 0.5f) * cellSize;
+        return new Vector2(right + xOffset, (bottom + top) * 0.5f);
+    }
+
     void FitCameraToBoard()
     {
         if (!fitCameraToBoard || Camera.main == null) return;
@@ -196,7 +218,10 @@ public class Board : MonoBehaviour
         cameraPosition.x = (left + right) * 0.5f;
         cameraPosition.y = (bottom + top) * 0.5f;
         Camera.main.transform.position = cameraPosition;
-        Camera.main.orthographicSize = (top - bottom) * 0.5f + cameraVerticalPadding;
+
+        float verticalSize = (top - bottom) * 0.5f + cameraVerticalPadding;
+        float horizontalSize = ((right - left) + cameraHorizontalPadding) * 0.5f / Camera.main.aspect;
+        Camera.main.orthographicSize = Mathf.Max(verticalSize, horizontalSize);
     }
 
     public Vector2Int GetGridPosition(Vector2 worldPos)
