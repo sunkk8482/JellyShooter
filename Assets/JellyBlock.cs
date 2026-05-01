@@ -48,10 +48,11 @@ public class JellyBlock : MonoBehaviour
 
         bool hitGround = collision.gameObject.CompareTag("Ground");
         bool hitBlock = collision.gameObject.CompareTag("Block");
+        bool hitWall = IsWallCollision(collision);
 
-        if (hitGround || hitBlock)
+        if (hitGround || hitBlock || hitWall)
         {
-            StopBlock();
+            StopBlock(collision);
         }
     }
 
@@ -285,7 +286,50 @@ public class JellyBlock : MonoBehaviour
         }
     }
 
-    void StopBlock()
+    bool IsWallCollision(Collision2D collision)
+    {
+        if (collision == null || collision.gameObject == null)
+            return false;
+
+        if (collision.gameObject.name.Contains("Wall"))
+            return true;
+
+        Transform parent = collision.transform.parent;
+        return parent != null && parent.name == "BoardWalls";
+    }
+
+    public void PlaceAtCells(List<Vector2Int> finalCells)
+    {
+        if (isStopped) return;
+        isStopped = true;
+
+        if (rb == null) rb = GetComponent<Rigidbody2D>();
+        if (rb != null)
+        {
+            rb.velocity = Vector2.zero;
+            rb.angularVelocity = 0f;
+            rb.bodyType = RigidbodyType2D.Kinematic;
+            rb.simulated = false;
+        }
+
+        DisablePieceColliders();
+
+        if (finalCells != null)
+        {
+            foreach (Vector2Int finalCell in finalCells)
+            {
+                if (!board.IsInside(finalCell.x, finalCell.y)) continue;
+
+                GameObject placedPiece = CreatePlacedPiece(finalCell);
+                board.SetBlock(finalCell.x, finalCell.y, placedPiece);
+            }
+        }
+
+        board.ResolveBoard();
+        Destroy(gameObject);
+    }
+
+    void StopBlock(Collision2D collision)
     {
         if (isStopped) return;
         isStopped = true;
@@ -297,7 +341,7 @@ public class JellyBlock : MonoBehaviour
 
         DisablePieceColliders();
 
-        List<Vector2Int> finalCells = GetCellsFromCurrentWorldPosition();
+        List<Vector2Int> finalCells = GetCellsFromCurrentWorldPosition(collision);
 
         foreach (Vector2Int finalCell in finalCells)
         {
@@ -305,33 +349,116 @@ public class JellyBlock : MonoBehaviour
             board.SetBlock(finalCell.x, finalCell.y, placedPiece);
         }
 
-        board.ApplyGravity();
         board.ResolveBoard();
-
-        if (board.CheckGameOver())
-        {
-            GameManager.Instance.GameOver();
-        }
 
         Destroy(gameObject);
     }
 
-    List<Vector2Int> GetCellsFromCurrentWorldPosition()
+    List<Vector2Int> GetCellsFromCurrentWorldPosition(Collision2D collision)
     {
         List<Vector2Int> cells = new List<Vector2Int>();
 
         foreach (Transform piece in pieces)
         {
             Vector2Int gridPos = board.GetGridPosition(piece.position);
-            gridPos.x = Mathf.Clamp(gridPos.x, 0, board.width - 1);
             gridPos.y = Mathf.Clamp(gridPos.y, 0, board.height - 1);
             cells.Add(gridPos);
         }
 
-        ResolveOverlapUpward(cells);
-        DropCellsDown(cells);
+        ClampCellsInsideHorizontalBounds(cells);
+        ResolveOverlapFromCollision(cells, collision);
 
         return cells;
+    }
+
+    void ResolveOverlapFromCollision(List<Vector2Int> cells, Collision2D collision)
+    {
+        Vector2Int pushDir = GetCollisionPushDirection(collision);
+
+        if (AreCellsPlaceable(cells))
+            return;
+
+        for (int i = 0; i < board.width + board.height; i++)
+        {
+            MoveCells(cells, pushDir);
+
+            if (AreCellsPlaceable(cells))
+                return;
+        }
+
+        ResolveOverlapUpward(cells);
+    }
+
+    void ClampCellsInsideHorizontalBounds(List<Vector2Int> cells)
+    {
+        int minX = int.MaxValue;
+        int maxX = int.MinValue;
+
+        foreach (Vector2Int cell in cells)
+        {
+            if (cell.x < minX) minX = cell.x;
+            if (cell.x > maxX) maxX = cell.x;
+        }
+
+        int shiftX = 0;
+        if (minX < 0)
+            shiftX = -minX;
+        else if (maxX >= board.width)
+            shiftX = board.width - 1 - maxX;
+
+        if (shiftX == 0) return;
+
+        for (int i = 0; i < cells.Count; i++)
+        {
+            cells[i] = new Vector2Int(cells[i].x + shiftX, cells[i].y);
+        }
+    }
+
+    Vector2Int GetCollisionPushDirection(Collision2D collision)
+    {
+        if (collision == null || collision.contactCount == 0)
+            return Vector2Int.up;
+
+        Vector2 normal = collision.GetContact(0).normal;
+
+        if (Mathf.Abs(normal.x) > Mathf.Abs(normal.y))
+        {
+            return normal.x > 0f ? Vector2Int.right : Vector2Int.left;
+        }
+
+        return normal.y > 0f ? Vector2Int.up : Vector2Int.down;
+    }
+
+    bool AreCellsPlaceable(List<Vector2Int> cells)
+    {
+        for (int i = 0; i < cells.Count; i++)
+        {
+            Vector2Int cell = cells[i];
+
+            if (!board.IsInside(cell.x, cell.y))
+                return false;
+
+            if (!board.IsEmpty(cell.x, cell.y))
+                return false;
+
+            for (int j = i + 1; j < cells.Count; j++)
+            {
+                if (cells[j] == cell)
+                    return false;
+            }
+        }
+
+        return true;
+    }
+
+    void MoveCells(List<Vector2Int> cells, Vector2Int direction)
+    {
+        for (int i = 0; i < cells.Count; i++)
+        {
+            int x = Mathf.Clamp(cells[i].x + direction.x, 0, board.width - 1);
+            int y = Mathf.Clamp(cells[i].y + direction.y, 0, board.height - 1);
+            cells[i] = new Vector2Int(x, y);
+        }
     }
 
     void ResolveOverlapUpward(List<Vector2Int> cells)

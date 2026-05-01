@@ -1,3 +1,4 @@
+using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
 
@@ -10,8 +11,10 @@ public class Launcher : MonoBehaviour
     public float maxDragDistance = 2f;
     public float touchRadius = 1f;
     public float maxPreviewDistance = 8f;
+    public float shotMoveSpeed = 14f;
 
     private bool isDragging = false;
+    private bool isShooting = false;
     private Vector2 currentDrag;
     private LineRenderer lineRenderer;
 
@@ -24,6 +27,9 @@ public class Launcher : MonoBehaviour
     void Start()
     {
         board = FindObjectOfType<Board>();
+
+        if (board != null)
+            transform.position = board.GetBoardTopCenter(0f);
 
         lineRenderer = GetComponent<LineRenderer>();
 
@@ -42,6 +48,19 @@ public class Launcher : MonoBehaviour
         if (GameManager.Instance != null && GameManager.Instance.isGameOver)
             return;
 
+        if (isShooting || (board != null && board.IsResolving))
+        {
+            isDragging = false;
+
+            if (lineRenderer != null)
+                lineRenderer.enabled = false;
+
+            if (ghostRoot != null)
+                ghostRoot.SetActive(false);
+
+            return;
+        }
+
         Vector2 mouseWorld = Camera.main.ScreenToWorldPoint(Input.mousePosition);
 
         if (currentBlock != null && !isDragging)
@@ -54,7 +73,7 @@ public class Launcher : MonoBehaviour
             nextBlock.transform.position = nextPreviewPoint.position;
         }
 
-        // »∏¿¸ ≈◊Ω∫∆Æ: PCø°º≠¥¬ R ≈∞
+        // ÌöåÏ†Ñ ÌÖåÏä§Ìä∏: PCÏóêÏÑúÎäî R ÌÇ§
         if (!isDragging && currentBlock != null && Input.GetKeyDown(KeyCode.R))
         {
             JellyBlock jelly = currentBlock.GetComponent<JellyBlock>();
@@ -71,7 +90,7 @@ public class Launcher : MonoBehaviour
                     lineRenderer.enabled = true;
 
                 if (ghostRoot != null)
-                    ghostRoot.SetActive(true);
+                    ghostRoot.SetActive(false);
             }
         }
 
@@ -90,7 +109,6 @@ public class Launcher : MonoBehaviour
             Vector2 direction = (Vector2)transform.position - currentDrag;
 
             DrawAimLine(currentDrag);
-            UpdateGhostPreview(direction);
         }
 
         if (Input.GetMouseButtonUp(0) && isDragging)
@@ -139,12 +157,18 @@ public class Launcher : MonoBehaviour
         if (currentBlock == null) return;
 
         JellyBlock currentJelly = currentBlock.GetComponent<JellyBlock>();
-        currentJelly.SetPreviewMode(false);
+        List<Vector2Int> landingCells = CalculateLandingCells(direction);
+        Vector2 targetWorldPosition = GetLandingWorldPosition(landingCells);
 
         Rigidbody2D rb = currentBlock.GetComponent<Rigidbody2D>();
-        rb.velocity = Vector2.zero;
-        rb.angularVelocity = 0f;
-        rb.AddForce(direction * shootPower, ForceMode2D.Impulse);
+        if (rb != null)
+        {
+            rb.velocity = Vector2.zero;
+            rb.angularVelocity = 0f;
+            rb.simulated = false;
+        }
+
+        GameObject shotBlock = currentBlock;
 
         currentBlock = nextBlock;
 
@@ -157,6 +181,122 @@ public class Launcher : MonoBehaviour
         {
             nextBlock = CreatePreviewBlock(nextPreviewPoint.position);
         }
+
+        StartCoroutine(MoveBlockToLanding(shotBlock, currentJelly, landingCells, targetWorldPosition));
+    }
+
+    public List<Vector2Int> CalculateLandingCells(Vector2 direction)
+    {
+        List<Vector2Int> fallbackCells = new List<Vector2Int>();
+
+        if (currentBlock == null || board == null)
+            return fallbackCells;
+
+        JellyBlock jelly = currentBlock.GetComponent<JellyBlock>();
+        if (jelly == null)
+            return fallbackCells;
+
+        Vector2 dir = direction.sqrMagnitude < 0.001f ? Vector2.down : direction.normalized;
+        Vector2 start = currentBlock.transform.position;
+        float step = Mathf.Max(0.05f, board.cellSize * 0.1f);
+
+        List<Vector2Int> lastValidCells = null;
+
+        for (float distance = 0f; distance <= maxPreviewDistance; distance += step)
+        {
+            Vector2 anchor = start + dir * distance;
+            List<Vector2Int> cells = GetCellsFromAnchor(jelly, anchor);
+
+            if (CanPlaceCells(cells))
+            {
+                lastValidCells = cells;
+                fallbackCells = cells;
+                continue;
+            }
+
+            if (lastValidCells != null)
+                return lastValidCells;
+        }
+
+        if (lastValidCells != null)
+            return lastValidCells;
+
+        return fallbackCells;
+    }
+
+    public Vector2 GetLandingWorldPosition(List<Vector2Int> cells)
+    {
+        if (currentBlock == null || cells == null || cells.Count == 0 || board == null)
+            return transform.position;
+
+        JellyBlock jelly = currentBlock.GetComponent<JellyBlock>();
+        if (jelly == null)
+            return transform.position;
+
+        List<Vector2> offsets = jelly.GetShapeOffsets();
+        Vector2 firstCellWorld = board.GetWorldPosition(cells[0].x, cells[0].y);
+        return firstCellWorld - offsets[0] * board.cellSize;
+    }
+
+    List<Vector2Int> GetCellsFromAnchor(JellyBlock jelly, Vector2 anchorWorldPos)
+    {
+        List<Vector2Int> cells = new List<Vector2Int>();
+
+        foreach (Vector2 offset in jelly.GetShapeOffsets())
+        {
+            Vector2 worldPos = anchorWorldPos + offset * board.cellSize;
+            cells.Add(board.GetGridPosition(worldPos));
+        }
+
+        return cells;
+    }
+
+    bool CanPlaceCells(List<Vector2Int> cells)
+    {
+        for (int i = 0; i < cells.Count; i++)
+        {
+            Vector2Int cell = cells[i];
+
+            if (!board.IsInside(cell.x, cell.y))
+                return false;
+
+            if (!board.IsEmpty(cell.x, cell.y))
+                return false;
+
+            for (int j = i + 1; j < cells.Count; j++)
+            {
+                if (cells[j] == cell)
+                    return false;
+            }
+        }
+
+        return true;
+    }
+
+    IEnumerator MoveBlockToLanding(GameObject shotBlock, JellyBlock jelly, List<Vector2Int> landingCells, Vector2 targetWorldPosition)
+    {
+        isShooting = true;
+
+        Vector2 startPosition = shotBlock.transform.position;
+        float distance = Vector2.Distance(startPosition, targetWorldPosition);
+        float duration = Mathf.Max(0.05f, distance / Mathf.Max(0.01f, shotMoveSpeed));
+        float elapsed = 0f;
+
+        while (elapsed < duration && shotBlock != null)
+        {
+            elapsed += Time.deltaTime;
+            float t = Mathf.Clamp01(elapsed / duration);
+            shotBlock.transform.position = Vector2.Lerp(startPosition, targetWorldPosition, t);
+            yield return null;
+        }
+
+        if (shotBlock != null)
+        {
+            shotBlock.transform.position = targetWorldPosition;
+            jelly.PlaceAtCells(landingCells);
+        }
+
+        isShooting = false;
     }
 
     void DrawAimLine(Vector2 dragPoint)
